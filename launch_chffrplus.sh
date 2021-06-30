@@ -75,6 +75,9 @@ function two_init {
   # disable bluetooth
   service call bluetooth_manager 8
 
+  # set IO scheduler
+  setprop sys.io.scheduler noop
+
   # Check for NEOS update
   if [ $(< /VERSION) != "$REQUIRED_NEOS_VERSION" ]; then
     if [ -f "$DIR/scripts/continue.sh" ]; then
