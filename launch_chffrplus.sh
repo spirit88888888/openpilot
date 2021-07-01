@@ -10,9 +10,6 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 
 function two_init {
 
-  # Wifi scan
-  wpa_cli IFNAME=wlan0 SCAN
-
   # *** shield cores 2-3 ***
 
   # android gets two cores
@@ -28,6 +25,30 @@ function two_init {
   # mask off 2-3 from RPS and XPS - Receive/Transmit Packet Steering
   echo 3 | tee  /sys/class/net/*/queues/*/rps_cpus
   echo 3 | tee  /sys/class/net/*/queues/*/xps_cpus
+
+  # *** set up IRQ affinities ***
+
+  # core 1 - non essential IRQs
+  echo 1 > /proc/irq/6/smp_affinity_list   # MDSS
+  echo 1 > /proc/irq/33/smp_affinity_list  # ufshcd (flash storage)
+  echo 1 > /proc/irq/35/smp_affinity_list  # wifi (wlan_pci)
+  echo 1 > /proc/irq/78/smp_affinity_list  # qcom,smd-modem (LTE radio)
+  echo 1 > /proc/irq/283/smp_affinity_list # msm_vidc (encoder)
+
+  # core 2 - GPU + camera IRQs
+  CAM_IRQS="177 178 179 180 181 182 183 192"
+  for irq in $CAM_IRQS; do
+    echo 2 > /proc/irq/$irq/smp_affinity_list
+  done
+  echo 2 > /proc/irq/193/smp_affinity_list # GPU
+
+  # core 3 - USB
+  echo 3 > /proc/irq/733/smp_affinity_list
+
+  # give GPU + camera threads RT priority
+  for pid in $(pgrep "kgsl|cci"); do
+    chrt -f -p 52 $pid  # RT priority
+  done
 
   # *** set up governors ***
 
@@ -46,34 +67,20 @@ function two_init {
   # /sys/class/devfreq/soc:qcom,mincpubw is the only one left at "powersave"
   # it seems to gain nothing but a wasted 500mW
 
-  # *** set up IRQ affinities ***
 
-  # Collect RIL and other possibly long-running I/O interrupts onto CPU 1
-  echo 1 > /proc/irq/78/smp_affinity_list # qcom,smd-modem (LTE radio)
-  echo 1 > /proc/irq/33/smp_affinity_list # ufshcd (flash storage)
-  echo 1 > /proc/irq/35/smp_affinity_list # wifi (wlan_pci)
-  echo 1 > /proc/irq/6/smp_affinity_list  # MDSS
+  # *** misc setup ***
 
-  # USB traffic needs realtime handling on cpu 3
-  [ -d "/proc/irq/733" ] && echo 3 > /proc/irq/733/smp_affinity_list
-
-  # GPU and camera get cpu 2
-  CAM_IRQS="177 178 179 180 181 182 183 184 185 186 192"
-  for irq in $CAM_IRQS; do
-    echo 2 > /proc/irq/$irq/smp_affinity_list
-  done
-  echo 2 > /proc/irq/193/smp_affinity_list # GPU
-
-  # give GPU threads RT priority
-  for pid in $(pgrep "kgsl"); do
-    chrt -f -p 52 $pid
-  done
+  # wifi scan
+  wpa_cli IFNAME=wlan0 SCAN
 
   # the flippening!
   LD_LIBRARY_PATH="" content insert --uri content://settings/system --bind name:s:user_rotation --bind value:i:1
 
   # disable bluetooth
   service call bluetooth_manager 8
+
+  # set IO scheduler
+  setprop sys.io.scheduler noop
 
   # Check for NEOS update
   if [ $(< /VERSION) != "$REQUIRED_NEOS_VERSION" ]; then
