@@ -971,6 +971,13 @@ void cameras_open(MultiCameraState *s) {
 
   driver_camera_start(&s->driver_cam);
   road_camera_start(&s->road_cam);
+
+  // these IRQs are only created after opening the cameras
+  for (const int irq : {184, 185, 186}) {
+    const char *val = "2";
+    std::string path = util::string_format("/proc/irq/%d/smp_affinity_list", irq);
+    util::write_file(path.c_str(), (void *)val, strlen(val));
+  }
 }
 
 
